@@ -1,45 +1,12 @@
-import 'package:flutter/material.dart';
-import 'package:get/get.dart';
-import 'package:model_viewer/app/controller/model_controller.dart';
-import 'package:model_viewer/app/screen/model_selection_screen.dart';
-import 'package:model_viewer/app/screen/view_model_screen.dart';
+import 'package:flutterscene_3d/src/app/app.dart';
+import 'package:flutterscene_3d/src/core/common/bootstrap.dart';
 
-void main() {
-  Get.put(ModelController());
-  runApp(const MotorcycleViewerApp());
-}
-
-class MotorcycleViewerApp extends StatelessWidget {
-  const MotorcycleViewerApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return GetMaterialApp(
-      title: '3D Studio',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFE53935),
-          brightness: Brightness.light,
-        ),
-        scaffoldBackgroundColor: Colors.white,
-        useMaterial3: true,
-        fontFamily: 'Inter',
-      ),
-      initialRoute: '/',
-      getPages: [
-        GetPage(
-          name: '/',
-          page: () => const ModelSelectionScreen(),
-          transition: Transition.fadeIn,
-        ),
-        GetPage(
-          name: '/viewer',
-          page: () => const ModelViewerScreen(),
-          transition: Transition.rightToLeftWithFade,
-          curve: Curves.easeInOut,
-        ),
-      ],
-    );
-  }
+/// The entry point of the application.
+///
+/// This file is responsible for initializing the app through the bootstrap
+/// layer and launching the root [FlutterSceneApp] widget.
+void main() async {
+  // Launch the app using the centralized bootstrap configuration.
+  // This handles provider initialization, global error handling, and more.
+  await bootstrap(() => const FlutterSceneApp());
 }

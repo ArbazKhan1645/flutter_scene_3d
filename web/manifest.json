@@ -1,6 +1,6 @@
 {
-    "name": "model_viewer",
-    "short_name": "model_viewer",
+    "name": "flutterscene_3d",
+    "short_name": "flutterscene_3d",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

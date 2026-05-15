@@ -5,11 +5,9 @@
 *.swp
 .DS_Store
 .atom/
-.build/
 .buildlog/
 .history
 .svn/
-.swiftpm/
 migrate_working_dir/
 
 # IntelliJ related
@@ -18,28 +16,64 @@ migrate_working_dir/
 *.iws
 .idea/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
+# The .vscode folder contains launch configuration and tasks you actually want to
+# share with your team. Therefore, it should be checked in.
+# .vscode/
 
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/Flutter/flutter_proxy_config.sh
+**/ios/GeneratedPluginRegistrant.[hm]
+**/ios/Podfile.lock
+**/ios/Pods/
+**/ios/Runner.xcworkspace/xcuserdata/
+**/ios/Runner/GeneratedPluginRegistrant.[hm]
+**/macos/Flutter/ephemeral/
+**/macos/GeneratedPluginRegistrant.swift
+**/macos/Podfile.lock
+**/macos/Pods/
 .dart_tool/
+.flutter-plugins
 .flutter-plugins-dependencies
+.packages
 .pub-cache/
 .pub/
 /build/
-/coverage/
 
-# Symbolication related
+# Symbolization related
 app.*.symbols
 
-# Obfuscation related
-app.*.map.json
+# Executable modules
+*.apk
+*.aab
+*.app
+*.ipa
 
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+# Android Studio will pack confidence out of these
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+
+# Generated files (Freezed/Riverpod)
+# Uncomment the following line if you don't want to check in generated code
+# *.freezed.dart
+# *.g.dart
+
+# Web related
+.last_build_id
+/build/web/
+
+# Windows related
+/build/windows/
+**/windows/flutter/ephemeral/
+**/windows/flutter/generated_plugins.cmake
+
+# Linux related
+/build/linux/
+**/linux/flutter/ephemeral/
+**/linux/flutter/generated_plugins.cmake

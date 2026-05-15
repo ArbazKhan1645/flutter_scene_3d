@@ -8,7 +8,7 @@
         android:maxSdkVersion="28" />
 
     <application
-        android:label="Moto 3D Viewer"
+        android:label="FlutterScene 3D"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true"
@@ -33,7 +33,7 @@
             </intent-filter>
         </activity>
         
-        <!-- Required by model_viewer_plus for AR on Android -->
+        <!-- Required by flutterscene_3d_plus for AR on Android -->
         <meta-data
             android:name="com.google.ar.core"
             android:value="optional" />
