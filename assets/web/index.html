@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>FlutterScene 3D Editor</title>
+  <link rel="stylesheet" href="css/editor.css" />
+</head>
+<body>
+  <div id="viewport"></div>
+  <div id="drop-overlay" class="hidden">
+    <div class="drop-message">Drop GLB / GLTF here</div>
+  </div>
+
+  <!-- Three.js r128 — served from Flutter assets, fully offline -->
+  <script src="js/three.min.js"></script>
+  <script src="js/OrbitControls.js"></script>
+  <script src="js/TransformControls.js"></script>
+  <script src="js/GLTFLoader.js"></script>
+  <script src="js/GLTFExporter.js"></script>
+  <!-- Main editor logic -->
+  <script src="js/editor.js"></script>
+</body>
+</html>
