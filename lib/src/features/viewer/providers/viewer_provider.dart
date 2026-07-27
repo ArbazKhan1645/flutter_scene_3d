@@ -68,6 +68,10 @@ class ViewerNotifier extends _$ViewerNotifier {
     );
   }
 
+  void loadModelFromFile(String filePath) {
+    selectModel(filePath, false);
+  }
+
   Future<void> pickModelFromDevice() async {
     try {
       final result = await FilePicker.pickFiles(

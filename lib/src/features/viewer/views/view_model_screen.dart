@@ -5,6 +5,8 @@ import 'package:flutterscene_3d/src/features/viewer/providers/viewer_provider.da
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../../editor/providers/editor_provider.dart';
+
 import 'widgets/animation_panel.dart';
 import 'widgets/camera_panel.dart';
 import 'widgets/color_picker_panel.dart';
@@ -29,7 +31,7 @@ class ModelViewerScreen extends ConsumerWidget {
             Positioned.fill(
               child: Column(
                 children: [
-                  _buildTopBar(context, notifier),
+                  _buildTopBar(context, ref, viewerState, notifier),
                   Expanded(
                     child: Stack(
                       children: [
@@ -54,7 +56,8 @@ class ModelViewerScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildTopBar(BuildContext context, ViewerNotifier notifier) {
+  Widget _buildTopBar(
+      BuildContext context, WidgetRef ref, ViewerState viewerState, ViewerNotifier notifier) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 15),
       decoration: BoxDecoration(
@@ -87,6 +90,8 @@ class ModelViewerScreen extends ConsumerWidget {
             ],
           ),
           const Spacer(),
+          _editInEditorBtn(context, ref, viewerState),
+          const SizedBox(width: 8),
           _topBarAction(
             icon: Icons.folder_open_rounded,
             onTap: notifier.pickModelFromDevice,
@@ -105,6 +110,45 @@ class ModelViewerScreen extends ConsumerWidget {
             tooltip: 'Screenshot',
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _editInEditorBtn(BuildContext context, WidgetRef ref, ViewerState state) {
+    return Tooltip(
+      message: 'Edit in 3D Scene Editor',
+      child: InkWell(
+        onTap: () {
+          final path = state.selectedModelPath;
+          if (path.isNotEmpty) {
+            final editorNotifier = ref.read(editorProvider.notifier);
+            if (state.isAssetModel) {
+              editorNotifier.loadAssetModelIntoScene(path);
+            } else {
+              editorNotifier.loadCustomModelFile(path);
+            }
+          }
+          Navigator.pushNamed(context, '/editor');
+        },
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: const Color(0xFF6c63ff),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.edit_rounded, color: Colors.white, size: 14),
+              SizedBox(width: 4),
+              Text(
+                'Edit in Editor',
+                style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

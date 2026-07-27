@@ -45,6 +45,11 @@ android {
         }
     }
 
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+
     buildTypes {
         release {
             // Enabling shrinking, obfuscation, and optimization

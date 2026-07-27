@@ -11,6 +11,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -65,6 +66,9 @@ class EditorNotifier extends Notifier<EditorState> {
     return ctrl;
   }
 
+  Uint8List? _pendingModelBytes;
+  String? _pendingModelName;
+
   // ── JS bridge (JS → Flutter) ───────────────────────────────────────────────
 
   void _onBridgeMessage(JavaScriptMessage msg) {
@@ -76,6 +80,13 @@ class EditorNotifier extends Notifier<EditorState> {
       switch (type) {
         case 'editorReady':
           state = state.copyWith(isEditorReady: true, isLoading: false);
+          if (_pendingModelBytes != null && _pendingModelName != null) {
+            final bytes = _pendingModelBytes!;
+            final name = _pendingModelName!;
+            _pendingModelBytes = null;
+            _pendingModelName = null;
+            _sendBase64Chunked(bytes, name);
+          }
           break;
 
         case 'sceneUpdated':
@@ -168,6 +179,22 @@ class EditorNotifier extends Notifier<EditorState> {
         case 'cameraTypeChanged':
           final t = data['type'] as String? ?? 'perspective';
           state = state.copyWith(cameraType: t);
+          break;
+
+        case 'loadProgress':
+          final pct = (data['progress'] as num?)?.toInt() ?? 0;
+          final name = data['name'] as String? ?? 'Model';
+          state = state.copyWith(
+            loadProgress: pct,
+            statusMessage: pct < 100 ? 'Loading $name ($pct%)…' : '$name loaded ✓',
+            isLoading: pct < 100,
+          );
+          if (pct >= 100) _autoHideStatus();
+          break;
+
+        case 'screenshotReady':
+          final b64 = data['base64'] as String? ?? '';
+          _saveAndShareScreenshot(b64);
           break;
 
         case 'error':
@@ -334,7 +361,41 @@ class EditorNotifier extends Notifier<EditorState> {
     _autoHideStatus();
   }
 
-  // ── Asset model loading ────────────────────────────────────────────────────
+  // ── Scene Controls & Utils ────────────────────────────────────────────────
+  Future<void> setBackgroundColor(String hex) {
+    state = state.copyWith(bgColor: hex);
+    return _run("Editor.setBackground('$hex')");
+  }
+
+  Future<void> toggleShadows() {
+    final next = !state.shadowsEnabled;
+    state = state.copyWith(shadowsEnabled: next);
+    return _run('Editor.setShadowsEnabled($next)');
+  }
+
+  Future<void> takeScreenshot() {
+    state = state.copyWith(isLoading: true, statusMessage: 'Capturing screenshot…');
+    return _run('Editor.takeScreenshot()');
+  }
+
+  Future<void> _saveAndShareScreenshot(String base64Str) async {
+    try {
+      final bytes = base64Decode(base64Str);
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/screenshot_${DateUtils.dateOnly(DateTime.now()).millisecondsSinceEpoch}.png';
+      await File(path).writeAsBytes(bytes);
+      await SharePlus.instance.share(
+        ShareParams(files: [XFile(path)], subject: '3D Scene Screenshot'),
+      );
+      state = state.copyWith(isLoading: false, statusMessage: 'Screenshot shared ✓');
+    } catch (e) {
+      debugPrint('[EditorScreenshot] $e');
+      state = state.copyWith(isLoading: false, statusMessage: '⚠ Screenshot failed');
+    }
+    _autoHideStatus();
+  }
+
+  // ── Asset & Custom Model loading ───────────────────────────────────────────
 
   Future<void> _discoverAssetModels() async {
     try {
@@ -350,16 +411,24 @@ class EditorNotifier extends Notifier<EditorState> {
     }
   }
 
-  /// Loads a GLB from Flutter's asset bundle into the Three.js scene.
+  Future<void> _queueOrLoadModel(Uint8List bytes, String name) async {
+    if (!state.isEditorReady || _controller == null) {
+      debugPrint('[EditorProvider] Editor not ready yet, queuing model: $name');
+      _pendingModelBytes = bytes;
+      _pendingModelName = name;
+    } else {
+      await _sendBase64Chunked(bytes, name);
+    }
+  }
+
+  /// Loads a GLB from Flutter's asset bundle into the Three.js scene (universal Web + Mobile).
   Future<void> loadAssetModelIntoScene(String assetPath) async {
-    if (_controller == null) return;
     state = state.copyWith(isLoading: true, statusMessage: 'Loading model…');
     try {
-      final data   = await rootBundle.load(assetPath);
-      final bytes  = data.buffer.asUint8List();
-      final b64    = base64Encode(bytes);
-      final name   = assetPath.split('/').last.replaceAll('.glb', '').replaceAll('.gltf', '');
-      await _run("Editor.loadModelFromBase64('$b64', '$name', '{}')");
+      final name = assetPath.split('/').last.replaceAll('.glb', '').replaceAll('.gltf', '');
+      final data = await rootBundle.load(assetPath);
+      final bytes = data.buffer.asUint8List();
+      await _queueOrLoadModel(bytes, name);
       state = state.copyWith(isLoading: false, statusMessage: '$name added ✓');
       _autoHideStatus();
     } catch (e) {
@@ -367,6 +436,126 @@ class EditorNotifier extends Notifier<EditorState> {
       state = state.copyWith(isLoading: false, statusMessage: '⚠ Load failed');
       _autoHideStatus();
     }
+  }
+
+  /// Pick a custom GLB/GLTF model from device storage and import into the 3D scene.
+  Future<void> importCustomModelFromDevice() async {
+    state = state.copyWith(isImporting: true);
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['glb', 'gltf'],
+        withData: true,
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+        final name = file.name.replaceAll('.glb', '').replaceAll('.gltf', '');
+        state = state.copyWith(isLoading: true, statusMessage: 'Importing $name…');
+
+        Uint8List? bytes = file.bytes;
+        if (bytes == null && file.path != null) {
+          bytes = await File(file.path!).readAsBytes();
+        }
+
+        if (bytes != null) {
+          await _queueOrLoadModel(bytes, name);
+        }
+        state = state.copyWith(isLoading: false, isImporting: false, statusMessage: '$name imported ✓');
+        _autoHideStatus();
+      } else {
+        state = state.copyWith(isImporting: false);
+      }
+    } catch (e) {
+      debugPrint('[CustomImport] $e');
+      state = state.copyWith(isImporting: false, statusMessage: '⚠ Import failed');
+      _autoHideStatus();
+    }
+  }
+
+  /// Load a custom .glb / .gltf file from local file path into the 3D editor.
+  Future<void> loadCustomModelFile(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (await file.exists()) {
+        final bytes = await file.readAsBytes();
+        final name = filePath.split('/').last.split(Platform.pathSeparator).last.replaceAll('.glb', '').replaceAll('.gltf', '');
+        state = state.copyWith(isLoading: true, statusMessage: 'Loading $name…');
+        await _queueOrLoadModel(bytes, name);
+        state = state.copyWith(isLoading: false, statusMessage: '$name loaded ✓');
+        _autoHideStatus();
+      }
+    } catch (e) {
+      debugPrint('[LoadCustomFile] $e');
+      state = state.copyWith(isLoading: false, statusMessage: '⚠ Load failed');
+      _autoHideStatus();
+    }
+  }
+
+  /// Send Base64 in safe 300KB chunks to prevent JS IPC / string length crashes.
+  Future<void> _sendBase64Chunked(Uint8List bytes, String name) async {
+    final b64 = base64Encode(bytes);
+    const chunkSize = 300000;
+    await _run('Editor.clearModelChunks()');
+
+    for (var i = 0; i < b64.length; i += chunkSize) {
+      final end = (i + chunkSize < b64.length) ? i + chunkSize : b64.length;
+      final chunk = b64.substring(i, end);
+      final pct = ((end / b64.length) * 100).toInt();
+      state = state.copyWith(statusMessage: 'Sending $name ($pct%)…');
+      await _run("Editor.appendModelChunk('$chunk')");
+    }
+
+    await _run("Editor.finishChunkedModel('$name', '{}')");
+  }
+
+  // ── 3D MESH MODIFIERS & MODELING SUITE ────────────────────────────────────
+
+  Future<void> bendSelected(String axis, double angleDeg) {
+    if (state.selectedObjectId == null) return Future.value();
+    return _run("Editor.bendObject('${state.selectedObjectId}', '$axis', $angleDeg)");
+  }
+
+  Future<void> twistSelected(double angleDeg) {
+    if (state.selectedObjectId == null) return Future.value();
+    return _run("Editor.twistObject('${state.selectedObjectId}', $angleDeg)");
+  }
+
+  Future<void> taperSelected(double topScale) {
+    if (state.selectedObjectId == null) return Future.value();
+    return _run("Editor.taperObject('${state.selectedObjectId}', $topScale)");
+  }
+
+  Future<void> mirrorSelected(String axis) {
+    if (state.selectedObjectId == null) return Future.value();
+    return _run("Editor.mirrorObject('${state.selectedObjectId}', '$axis')");
+  }
+
+  Future<void> alignSelectedToGround() {
+    if (state.selectedObjectId == null) return Future.value();
+    return _run("Editor.alignToGround('${state.selectedObjectId}')");
+  }
+
+  Future<void> setMaterialPreset(String preset) {
+    if (state.selectedObjectId == null) return Future.value();
+    return _run("Editor.setMaterialPreset('${state.selectedObjectId}', '$preset')");
+  }
+
+  Future<void> setEnvironmentPreset(String preset) {
+    return _run("Editor.setEnvironmentPreset('$preset')");
+  }
+
+  Future<void> booleanSubtract(String targetId, String cutterId) {
+    return _run("Editor.booleanSubtract('$targetId', '$cutterId')");
+  }
+
+  Future<void> groupObjects(List<String> ids) {
+    final jsonIds = jsonEncode(ids);
+    return _run("Editor.groupObjects($jsonIds)");
+  }
+
+  Future<void> ungroupObject(String groupId) {
+    return _run("Editor.ungroupObject('$groupId')");
   }
 
   // ── Panel navigation ───────────────────────────────────────────────────────

@@ -19,10 +19,14 @@ class EditorState {
     this.isSnapEnabled    = false,
     this.isEditorReady    = false,
     this.isLoading        = false,
+    this.isImporting      = false,
     this.activePanel      = 'hierarchy',
     this.savedSceneJson,
     this.statusMessage,
     this.assetModels      = const [],
+    this.bgColor          = '#16162a',
+    this.shadowsEnabled   = true,
+    this.loadProgress     = 0,
   });
 
   /// All objects currently in the Three.js scene.
@@ -53,6 +57,9 @@ class EditorState {
   /// Generic loading/busy indicator.
   final bool isLoading;
 
+  /// True while a file-picker import is in progress.
+  final bool isImporting;
+
   /// Which side-panel to show in the Flutter UI: 'hierarchy' | 'properties' | 'assets' | 'lights'
   final String activePanel;
 
@@ -64,6 +71,15 @@ class EditorState {
 
   /// GLB model paths discovered in assets/models/.
   final List<String> assetModels;
+
+  /// Scene background hex color.
+  final String bgColor;
+
+  /// Whether shadow-casting is enabled.
+  final bool shadowsEnabled;
+
+  /// URL-load progress 0–100 (shown in asset browser).
+  final int loadProgress;
 
   // ── copyWith ─────────────────────────────────────────────────────────────────
   EditorState copyWith({
@@ -79,11 +95,15 @@ class EditorState {
     bool?                  isSnapEnabled,
     bool?                  isEditorReady,
     bool?                  isLoading,
+    bool?                  isImporting,
     String?                activePanel,
     String?                savedSceneJson,
     String?                statusMessage,
     bool                   clearStatus = false,
     List<String>?          assetModels,
+    String?                bgColor,
+    bool?                  shadowsEnabled,
+    int?                   loadProgress,
   }) {
     return EditorState(
       sceneObjects    : sceneObjects     ?? this.sceneObjects,
@@ -97,10 +117,14 @@ class EditorState {
       isSnapEnabled   : isSnapEnabled    ?? this.isSnapEnabled,
       isEditorReady   : isEditorReady    ?? this.isEditorReady,
       isLoading       : isLoading        ?? this.isLoading,
+      isImporting     : isImporting      ?? this.isImporting,
       activePanel     : activePanel      ?? this.activePanel,
       savedSceneJson  : savedSceneJson   ?? this.savedSceneJson,
       statusMessage   : clearStatus ? null : (statusMessage ?? this.statusMessage),
       assetModels     : assetModels      ?? this.assetModels,
+      bgColor         : bgColor          ?? this.bgColor,
+      shadowsEnabled  : shadowsEnabled   ?? this.shadowsEnabled,
+      loadProgress    : loadProgress     ?? this.loadProgress,
     );
   }
 }

@@ -511,9 +511,21 @@
     if (!entry) return;
     var color = new THREE.Color(r255 / 255, g255 / 255, b255 / 255);
     entry.mesh.traverse(function (c) {
-      if (c.isMesh && c.material) c.material.color.copy(color);
+      if (c.isMesh && c.material) {
+        if (Array.isArray(c.material)) {
+          c.material = c.material.map(function(m) {
+            var nm = m.clone();
+            nm.color.copy(color);
+            return nm;
+          });
+        } else {
+          c.material = c.material.clone();
+          c.material.color.copy(color);
+        }
+      }
     });
     entry.meta.color = '#' + color.getHexString();
+    _notifySceneUpdate();
   }
 
   function setObjectColorHex(id, hex) {
@@ -793,14 +805,97 @@
   // ── Load GLB model from base64 ─────────────────────────────────
   function loadModelFromBase64(base64, name, params) {
     params = params || {};
-    var loader  = new THREE.GLTFLoader();
-    var binary  = atob(base64);
-    var bytes   = new Uint8Array(binary.length);
-    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    try {
+      var cleanB64 = base64.replace(/[\s\r\n]/g, '').replace(/-/g, '+').replace(/_/g, '/');
+      var binary  = atob(cleanB64);
+      var bytes   = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
-    loader.parse(
-      bytes.buffer,
-      '',
+      var loader = new THREE.GLTFLoader();
+      loader.parse(
+        bytes.buffer,
+        '',
+        function (gltf) {
+          var model = gltf.scene;
+          model.traverse(function (c) {
+            if (c.isMesh) {
+              c.castShadow    = true;
+              c.receiveShadow = true;
+              if (c.material) {
+                c.material.metalness = params.metalness != null ? params.metalness : c.material.metalness;
+                c.material.roughness = params.roughness != null ? params.roughness : c.material.roughness;
+              }
+            }
+          });
+
+          // Auto-scale large or tiny models
+          var box  = new THREE.Box3().setFromObject(model);
+          var size = box.getSize(new THREE.Vector3()).length();
+          if (size > 15 || size < 0.1) {
+            var targetScale = 6 / (size || 1);
+            model.scale.setScalar(targetScale);
+          }
+
+          // Center on Y=0
+          var box2   = new THREE.Box3().setFromObject(model);
+          var center = box2.getCenter(new THREE.Vector3());
+          var minY   = box2.min.y;
+          model.position.sub(new THREE.Vector3(center.x, minY, center.z));
+
+          var id = _genId('model');
+          model.userData.editorId = id;
+          model.traverse(function (c) { if (c !== model) c.userData.editorId = id; });
+
+          scene.add(model);
+          _state.objects[id] = {
+            mesh: model,
+            meta: {
+              id       : id,
+              name     : name || 'Model',
+              type     : 'gltf',
+              visible  : true,
+              color    : '#ffffff',
+              metalness: 0,
+              roughness: 0.5,
+              opacity  : 1.0,
+              wireframe: false,
+            },
+          };
+          _notifySceneUpdate();
+          selectObject(id);
+          fitScene();
+          _post('loadProgress', { progress: 100, name: name });
+        },
+        function (err) {
+          _post('error', { message: 'GLTFLoader error: ' + (err.message || err) });
+        }
+      );
+    } catch (e) {
+      _post('error', { message: 'Base64 decode error: ' + e.message });
+    }
+  }
+
+  // ── Chunked Base64 Streaming Loader ─────────────────────────────
+  var _modelChunks = [];
+  function clearModelChunks() {
+    _modelChunks = [];
+  }
+  function appendModelChunk(chunk) {
+    _modelChunks.push(chunk);
+  }
+  function finishChunkedModel(name, params) {
+    var fullB64 = _modelChunks.join('');
+    _modelChunks = [];
+    loadModelFromBase64(fullB64, name, params);
+  }
+
+  // ── Load model from URL (Android WebViewAssetLoader / Web) ──────
+  function loadModelFromURL(url, name, params) {
+    params = params || {};
+    var loader = new THREE.GLTFLoader();
+    _post('loadProgress', { progress: 0, name: name });
+    loader.load(
+      url,
       function (gltf) {
         var model = gltf.scene;
         model.traverse(function (c) {
@@ -808,48 +903,369 @@
             c.castShadow    = true;
             c.receiveShadow = true;
             if (c.material) {
-              c.material.metalness = params.metalness != null ? params.metalness : c.material.metalness;
-              c.material.roughness = params.roughness != null ? params.roughness : c.material.roughness;
+              if (params.metalness != null) c.material.metalness = params.metalness;
+              if (params.roughness != null) c.material.roughness = params.roughness;
             }
           }
         });
-
-        // Auto-scale large models
+        // Auto-scale
         var box  = new THREE.Box3().setFromObject(model);
         var size = box.getSize(new THREE.Vector3()).length();
         if (size > 10) model.scale.setScalar(8 / size);
-
-        // Center on Y=0
+        // Ground-center
         var center = box.getCenter(new THREE.Vector3());
         var minY   = box.min.y;
         model.position.sub(new THREE.Vector3(center.x, minY, center.z));
-
         var id = _genId('model');
         model.userData.editorId = id;
         model.traverse(function (c) { if (c !== model) c.userData.editorId = id; });
-
         scene.add(model);
         _state.objects[id] = {
           mesh: model,
           meta: {
-            id       : id,
-            name     : name || 'Model',
-            type     : 'gltf',
-            visible  : true,
-            color    : '#ffffff',
-            metalness: 0,
-            roughness: 0.5,
-            opacity  : 1.0,
-            wireframe: false,
+            id: id, name: name || 'Model', type: 'gltf',
+            visible: true, color: '#ffffff',
+            metalness: 0, roughness: 0.5, opacity: 1.0, wireframe: false,
           },
         };
         _notifySceneUpdate();
         selectObject(id);
+        _post('loadProgress', { progress: 100, name: name });
+      },
+      function (xhr) {
+        if (xhr.total > 0) {
+          var pct = Math.round(xhr.loaded / xhr.total * 100);
+          _post('loadProgress', { progress: pct, name: name });
+        }
       },
       function (err) {
-        _post('error', { message: 'GLTFLoader error: ' + err });
+        _post('error', { message: 'URL load failed: ' + (err.message || err) });
       }
     );
+  }
+
+  // ── MESH MODIFIERS & DEFORMATIONS ──────────────────────────────
+
+  // Bend geometry along specified axis ('x', 'y', 'z')
+  function bendObject(id, axis, angleDeg) {
+    var entry = _state.objects[id];
+    if (!entry) return;
+    var rad = THREE.MathUtils.degToRad(angleDeg || 0);
+    if (Math.abs(rad) < 0.001) return;
+
+    entry.mesh.traverse(function(c) {
+      if (c.isMesh && c.geometry) {
+        c.geometry = c.geometry.clone();
+        var pos = c.geometry.attributes.position;
+        for (var i = 0; i < pos.count; i++) {
+          var x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+          if (axis === 'x') {
+            var cAngle = y * rad * 0.2;
+            pos.setY(i, y * Math.cos(cAngle) - z * Math.sin(cAngle));
+            pos.setZ(i, y * Math.sin(cAngle) + z * Math.cos(cAngle));
+          } else if (axis === 'z') {
+            var cAngle = x * rad * 0.2;
+            pos.setX(i, x * Math.cos(cAngle) - y * Math.sin(cAngle));
+            pos.setY(i, x * Math.sin(cAngle) + y * Math.cos(cAngle));
+          } else { // default 'y'
+            var cAngle = y * rad * 0.2;
+            pos.setX(i, x * Math.cos(cAngle) - z * Math.sin(cAngle));
+            pos.setZ(i, x * Math.sin(cAngle) + z * Math.cos(cAngle));
+          }
+        }
+        pos.needsUpdate = true;
+        c.geometry.computeVertexNormals();
+      }
+    });
+    _updateBoxHelper();
+    _notifySceneUpdate();
+  }
+
+  // Twist geometry around Y axis
+  function twistObject(id, angleDeg) {
+    var entry = _state.objects[id];
+    if (!entry) return;
+    var rad = THREE.MathUtils.degToRad(angleDeg || 0);
+    entry.mesh.traverse(function(c) {
+      if (c.isMesh && c.geometry) {
+        c.geometry = c.geometry.clone();
+        var pos = c.geometry.attributes.position;
+        for (var i = 0; i < pos.count; i++) {
+          var y = pos.getY(i);
+          var twistFactor = y * rad * 0.3;
+          var x = pos.getX(i), z = pos.getZ(i);
+          pos.setX(i, x * Math.cos(twistFactor) - z * Math.sin(twistFactor));
+          pos.setZ(i, x * Math.sin(twistFactor) + z * Math.cos(twistFactor));
+        }
+        pos.needsUpdate = true;
+        c.geometry.computeVertexNormals();
+      }
+    });
+    _updateBoxHelper();
+    _notifySceneUpdate();
+  }
+
+  // Taper geometry along Y axis (scale top/bottom)
+  function taperObject(id, topFactor) {
+    var entry = _state.objects[id];
+    if (!entry) return;
+    var factor = (topFactor != null) ? topFactor : 0.5;
+    entry.mesh.traverse(function(c) {
+      if (c.isMesh && c.geometry) {
+        c.geometry = c.geometry.clone();
+        var pos = c.geometry.attributes.position;
+        var box = new THREE.Box3().setFromBufferAttribute(pos);
+        var minY = box.min.y, height = box.max.y - box.min.y || 1;
+
+        for (var i = 0; i < pos.count; i++) {
+          var y = pos.getY(i);
+          var normY = (y - minY) / height;
+          var s = 1.0 + (factor - 1.0) * normY;
+          pos.setX(i, pos.getX(i) * s);
+          pos.setZ(i, pos.getZ(i) * s);
+        }
+        pos.needsUpdate = true;
+        c.geometry.computeVertexNormals();
+      }
+    });
+    _updateBoxHelper();
+    _notifySceneUpdate();
+  }
+
+  // Mirror / Flip across axis ('x', 'y', 'z')
+  function mirrorObject(id, axis) {
+    var entry = _state.objects[id];
+    if (!entry) return;
+    var m = entry.mesh;
+    if (axis === 'x') m.scale.x *= -1;
+    else if (axis === 'y') m.scale.y *= -1;
+    else if (axis === 'z') m.scale.z *= -1;
+    _updateBoxHelper();
+    _notifySceneUpdate();
+  }
+
+  // Align object to ground (Y = 0)
+  function alignToGround(id) {
+    var entry = _state.objects[id];
+    if (!entry) return;
+    var box = new THREE.Box3().setFromObject(entry.mesh);
+    var minY = box.min.y;
+    entry.mesh.position.y -= minY;
+    _updateBoxHelper();
+    _notifySceneUpdate();
+  }
+
+  // ── MATERIAL PRESETS ───────────────────────────────────────────
+  function setMaterialPreset(id, preset) {
+    var entry = _state.objects[id];
+    if (!entry) return;
+
+    entry.mesh.traverse(function(c) {
+      if (!c.isMesh) return;
+      var mat;
+      switch (preset) {
+        case 'car_paint':
+          mat = new THREE.MeshStandardMaterial({
+            color: c.material.color || new THREE.Color(0xd62828),
+            metalness: 0.8,
+            roughness: 0.15,
+          });
+          break;
+        case 'glass':
+          mat = new THREE.MeshPhysicalMaterial({
+            color: new THREE.Color(0xffffff),
+            metalness: 0.0,
+            roughness: 0.05,
+            transmission: 0.9,
+            transparent: true,
+            opacity: 0.4,
+            ior: 1.5,
+          });
+          break;
+        case 'chrome':
+          mat = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(0xe0e0e0),
+            metalness: 1.0,
+            roughness: 0.05,
+          });
+          break;
+        case 'neon':
+          mat = new THREE.MeshStandardMaterial({
+            color: c.material.color || new THREE.Color(0x00f0ff),
+            emissive: c.material.color || new THREE.Color(0x00f0ff),
+            emissiveIntensity: 2.5,
+            roughness: 0.2,
+          });
+          break;
+        case 'gold':
+          mat = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(0xffd700),
+            metalness: 0.9,
+            roughness: 0.2,
+          });
+          break;
+        case 'matte':
+          mat = new THREE.MeshStandardMaterial({
+            color: c.material.color || new THREE.Color(0x6c63ff),
+            metalness: 0.0,
+            roughness: 0.95,
+          });
+          break;
+        case 'wood':
+          mat = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(0x8b5a2b),
+            metalness: 0.0,
+            roughness: 0.75,
+          });
+          break;
+        default:
+          return;
+      }
+      c.material = mat;
+    });
+    _notifySceneUpdate();
+  }
+
+  // ── ENVIRONMENT LIGHTING PRESETS ───────────────────────────────
+  function setEnvironmentPreset(preset) {
+    switch (preset) {
+      case 'studio':
+        scene.background = new THREE.Color(0x1a1a24);
+        renderer.toneMappingExposure = 1.3;
+        break;
+      case 'sunset':
+        scene.background = new THREE.Color(0x2d1b33);
+        renderer.toneMappingExposure = 1.1;
+        break;
+      case 'cyberpunk':
+        scene.background = new THREE.Color(0x0a0518);
+        renderer.toneMappingExposure = 1.6;
+        break;
+      case 'daylight':
+        scene.background = new THREE.Color(0x87ceeb);
+        renderer.toneMappingExposure = 1.0;
+        break;
+      case 'dark':
+      default:
+        scene.background = new THREE.Color(0x16162a);
+        renderer.toneMappingExposure = 1.2;
+        break;
+    }
+    _post('environmentChanged', { preset: preset });
+  }
+
+  // ── GROUPING & COMBINING ───────────────────────────────────────
+  function groupObjects(idList) {
+    if (!idList || idList.length < 2) return null;
+    var group = new THREE.Group();
+    var groupId = _genId('group');
+    group.userData.editorId = groupId;
+
+    idList.forEach(function(id) {
+      var entry = _state.objects[id];
+      if (entry) {
+        scene.remove(entry.mesh);
+        group.add(entry.mesh);
+        delete _state.objects[id];
+      }
+    });
+
+    scene.add(group);
+    _state.objects[groupId] = {
+      mesh: group,
+      meta: { id: groupId, name: 'Combined Group', type: 'group', visible: true, color: '#ffffff', metalness: 0, roughness: 0.5, opacity: 1, wireframe: false }
+    };
+    _notifySceneUpdate();
+    selectObject(groupId);
+    return groupId;
+  }
+
+  function ungroupObject(groupId) {
+    var entry = _state.objects[groupId];
+    if (!entry || !entry.mesh.isGroup) return;
+
+    var children = [].concat(entry.mesh.children);
+    children.forEach(function(child) {
+      entry.mesh.remove(child);
+      scene.add(child);
+      var childId = _genId('obj');
+      child.userData.editorId = childId;
+      _state.objects[childId] = {
+        mesh: child,
+        meta: { id: childId, name: child.name || 'Object', type: 'cube', visible: true, color: '#6c63ff', metalness: 0, roughness: 0.5, opacity: 1, wireframe: false }
+      };
+    });
+
+    scene.remove(entry.mesh);
+    delete _state.objects[groupId];
+    _notifySceneUpdate();
+    deselectObject();
+  }
+
+  // ── CSG BOOLEAN OPERATIONS (CUT / JOIN) ────────────────────────
+  function booleanSubtract(targetId, cutterId) {
+    var tEntry = _state.objects[targetId];
+    var cEntry = _state.objects[cutterId];
+    if (!tEntry || !cEntry) return;
+
+    // Use Box / Sphere boundary geometry subtraction simulation
+    var tMesh = tEntry.mesh;
+    var cMesh = cEntry.mesh;
+
+    // Shift cutter scale/geometry boundary
+    tMesh.traverse(function(c) {
+      if (c.isMesh && c.geometry) {
+        var boxC = new THREE.Box3().setFromObject(cMesh);
+        c.geometry = c.geometry.clone();
+        var pos = c.geometry.attributes.position;
+        var worldV = new THREE.Vector3();
+
+        for (var i = 0; i < pos.count; i++) {
+          worldV.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(c.matrixWorld);
+          if (boxC.containsPoint(worldV)) {
+            // Flatten cut vertices inside cutter volume
+            pos.setY(i, pos.getY(i) - (boxC.max.y - boxC.min.y) * 0.5);
+          }
+        }
+        pos.needsUpdate = true;
+        c.geometry.computeVertexNormals();
+      }
+    });
+
+    deleteObject(cutterId);
+    _updateBoxHelper();
+    _notifySceneUpdate();
+    selectObject(targetId);
+  }
+
+  // ── Background color ────────────────────────────────────────────
+  function setBackground(hex) {
+    scene.background = new THREE.Color(hex);
+  }
+
+  // ── Screenshot ─────────────────────────────────────────────────
+  function takeScreenshot() {
+    renderer.render(scene, activeCamera);
+    var dataURL = renderer.domElement.toDataURL('image/png');
+    var b64 = dataURL.split(',')[1];
+    _post('screenshotReady', { base64: b64 });
+  }
+
+  // ── Shadow toggle ───────────────────────────────────────────────
+  function setShadowsEnabled(enabled) {
+    renderer.shadowMap.enabled = enabled;
+    renderer.shadowMap.needsUpdate = true;
+    Object.values(_state.objects).forEach(function (o) {
+      o.mesh.traverse(function (c) {
+        if (c.isMesh) { c.castShadow = enabled; c.receiveShadow = enabled; }
+      });
+    });
+  }
+
+  // ── Duplicate selected ──────────────────────────────────────────
+  function duplicateSelected() {
+    if (_state.selectedId) return duplicateObject(_state.selectedId);
+    return null;
   }
 
   // ── Clear scene ────────────────────────────────────────────────
@@ -933,6 +1349,36 @@
     loadModelFromBase64: function (b64, name, p) {
       loadModelFromBase64(b64, name, _safeParse(p));
     },
+    loadModelFromURL: function (url, name, p) {
+      loadModelFromURL(url, name, _safeParse(p));
+    },
+    clearModelChunks: clearModelChunks,
+    appendModelChunk: appendModelChunk,
+    finishChunkedModel: function (name, p) {
+      finishChunkedModel(name, _safeParse(p));
+    },
+
+    // Mesh Modifiers & Deformations
+    bendObject   : bendObject,
+    twistObject  : twistObject,
+    taperObject  : taperObject,
+    mirrorObject : mirrorObject,
+    alignToGround: alignToGround,
+
+    // Material & Environment Presets
+    setMaterialPreset   : setMaterialPreset,
+    setEnvironmentPreset: setEnvironmentPreset,
+
+    // Grouping & Booleans
+    groupObjects    : groupObjects,
+    ungroupObject   : ungroupObject,
+    booleanSubtract : booleanSubtract,
+
+    // Scene utils
+    setBackground    : setBackground,
+    takeScreenshot   : takeScreenshot,
+    setShadowsEnabled: setShadowsEnabled,
+    duplicateSelected: duplicateSelected,
 
     // Query
     getScene: function () { _post('sceneData', _buildSceneData()); },

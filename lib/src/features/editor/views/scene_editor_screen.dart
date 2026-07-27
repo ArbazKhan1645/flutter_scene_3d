@@ -28,6 +28,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../providers/editor_provider.dart';
 import 'widgets/asset_browser_panel.dart';
 import 'widgets/editor_toolbar.dart';
+import 'widgets/modeling_tools_panel.dart';
 import 'widgets/properties_panel.dart';
 import 'widgets/scene_hierarchy_panel.dart';
 import 'widgets/transform_toolbar.dart';
@@ -130,9 +131,9 @@ class _SceneEditorScreenState extends ConsumerState<SceneEditorScreen>
       SizedBox(
         width: 220,
         child: _buildPanelTabs(
-          panels   : ['hierarchy', 'assets'],
-          labels   : ['Hierarchy', 'Assets'],
-          icons    : [Icons.account_tree_rounded, Icons.folder_open_rounded],
+          panels   : ['hierarchy', 'tools', 'assets'],
+          labels   : ['Tree', 'Tools', 'Assets'],
+          icons    : [Icons.account_tree_rounded, Icons.build_circle_rounded, Icons.folder_open_rounded],
           state    : state,
           panelBuilder: _buildPanel,
         ),
@@ -239,6 +240,13 @@ class _SceneEditorScreenState extends ConsumerState<SceneEditorScreen>
           ),
           Container(height: 1, color: const Color(0xFF1f1f35)),
           _FloatTab(
+            icon   : Icons.build_circle_rounded,
+            label  : 'Tools',
+            active : state.activePanel == 'tools' && _drawerFraction > 0,
+            onTap  : () => _toggleDrawer('tools'),
+          ),
+          Container(height: 1, color: const Color(0xFF1f1f35)),
+          _FloatTab(
             icon   : Icons.folder_open_rounded,
             label  : 'Assets',
             active : state.activePanel == 'assets' && _drawerFraction > 0,
@@ -309,6 +317,7 @@ class _SceneEditorScreenState extends ConsumerState<SceneEditorScreen>
   Widget _buildPanel(String panel) {
     switch (panel) {
       case 'hierarchy': return const SceneHierarchyPanel();
+      case 'tools'    : return const ModelingToolsPanel();
       case 'assets'   : return const AssetBrowserPanel();
       case 'properties':
       default         : return const PropertiesPanel();
